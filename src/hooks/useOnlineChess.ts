@@ -137,6 +137,7 @@ export function useOnlineChess() {
 
     ws.onerror = () => {
       setConnecting(false);
+      setError((prev) => prev ?? 'Unable to establish live match connection. Retrying...');
     };
   }, []);
 
@@ -147,10 +148,42 @@ export function useOnlineChess() {
   }, []);
 
   const createRoom = useCallback(
-    (params: CreateRoomParams) => {
+    async (params: CreateRoomParams) => {
       playerNameRef.current = params.playerName;
       roomIdRef.current = '';
       tokenRef.current = '';
+      setConnecting(true);
+      setError(null);
+
+      try {
+        const res = await fetch('/api/rooms', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(params),
+        });
+        if (res.ok) {
+          const data = (await res.json()) as {
+            roomId: string;
+            role: PieceColor;
+            playerToken: string;
+            snapshot: OnlineRoomSnapshot;
+          };
+          roomIdRef.current = data.roomId;
+          tokenRef.current = data.playerToken;
+          setRole(data.role);
+          setSnapshot(data.snapshot);
+          connectSocket({
+            type: 'room:join',
+            roomId: data.roomId,
+            playerName: params.playerName,
+            playerToken: data.playerToken,
+          });
+          return;
+        }
+      } catch {
+        // Fallback to WebSocket room:create
+      }
+
       connectSocket({
         type: 'room:create',
         playerName: params.playerName,

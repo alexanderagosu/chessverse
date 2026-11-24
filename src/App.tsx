@@ -19,7 +19,7 @@ import { ArenaSidebar } from './components/ArenaSidebar';
 import { LobbyView } from './components/LobbyView';
 import { RulesModal } from './components/RulesModal';
 import { GameOverModal } from './components/GameOverModal';
-import { ArrowLeft, Eye } from 'lucide-react';
+import { ArrowLeft, Check, Copy, Eye, Link2 } from 'lucide-react';
 
 const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
 
@@ -60,6 +60,78 @@ function playMoveSound(record: MoveRecord, isGameOver: boolean, winner: PieceCol
     soundFX.playMove();
   }
 }
+
+interface OnlineWaitingBannerProps {
+  roomId: string | null;
+  connecting: boolean;
+  isPublic: boolean;
+}
+
+const OnlineWaitingBanner: React.FC<OnlineWaitingBannerProps> = ({ roomId, connecting, isPublic }) => {
+  const [copiedType, setCopiedType] = useState<'code' | 'link' | null>(null);
+
+  const handleCopy = async (kind: 'code' | 'link') => {
+    if (!roomId) return;
+    const text =
+      kind === 'code'
+        ? roomId
+        : `${window.location.origin}${window.location.pathname}?room=${roomId}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedType(kind);
+      window.setTimeout(() => setCopiedType(null), 2000);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
+
+  return (
+    <div className="rounded-xl bg-[#131826] border border-[#D4AF37]/45 px-4 py-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div>
+        <div className="text-xs text-[#CFC7B4]">
+          {roomId
+            ? `${isPublic ? 'Public' : 'Private'} Online Room · Share code for opponent to join`
+            : connecting
+              ? 'Creating online room...'
+              : 'Preparing online room...'}
+        </div>
+        <div className="mt-1 flex items-baseline gap-3">
+          {roomId ? (
+            <span className="font-mono-tabular text-2xl font-bold tracking-[0.22em] text-[#E5C158] select-all">
+              {roomId}
+            </span>
+          ) : (
+            <span className="font-mono-tabular text-lg font-semibold text-[#8E95A5]">
+              ------
+            </span>
+          )}
+        </div>
+      </div>
+
+      {roomId && (
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => void handleCopy('code')}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#D4AF37] hover:bg-[#E5C158] text-[#090B10] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+          >
+            {copiedType === 'code' ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+            <span>{copiedType === 'code' ? 'Code Copied' : 'Copy Code'}</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => void handleCopy('link')}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1A2133] border border-white/10 hover:border-[#D4AF37]/50 text-[#F7F3EA] text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+          >
+            {copiedType === 'link' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Link2 className="w-3.5 h-3.5 text-[#E5C158]" />}
+            <span>{copiedType === 'link' ? 'Link Copied' : 'Copy Invite Link'}</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
 
 export default function App() {
   const [view, setView] = useState<'lobby' | 'arena'>('lobby');
@@ -765,6 +837,14 @@ export default function App() {
             {/* Board Column */}
             <section className="flex flex-col gap-3 w-full max-w-[600px] mx-auto lg:max-w-none">
               <div className="w-full max-w-[600px] mx-auto space-y-3">
+                {isOnline && (!snap || snap.status === 'waiting') && (
+                  <OnlineWaitingBanner
+                    roomId={snap?.roomId ?? null}
+                    connecting={online.connecting}
+                    isPublic={snap?.isPublic ?? isPublicRoom}
+                  />
+                )}
+
                 <PlayerBar {...getPlayerProps(topColor)} />
 
                 {viewPly !== null && (

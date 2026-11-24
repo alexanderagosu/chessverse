@@ -224,6 +224,68 @@ async function startServer(): Promise<void> {
     res.json({ ok: true });
   });
 
+  function createRoomRecord(params: {
+    playerName?: unknown;
+    preferredColor?: unknown;
+    timeControlId?: unknown;
+    isPublic?: unknown;
+    socket?: WebSocket | null;
+  }): { room: OnlineRoom; role: PieceColor; token: string } {
+    const playerName = sanitizeName(params.playerName, 'Player 1');
+    const pref: PieceColor =
+      params.preferredColor === 'w' || params.preferredColor === 'b'
+        ? params.preferredColor
+        : Math.random() < 0.5
+          ? 'w'
+          : 'b';
+    const tcKey =
+      typeof params.timeControlId === 'string' && VALID_TIME_CONTROLS[params.timeControlId]
+        ? params.timeControlId
+        : '10+5';
+    const tc = VALID_TIME_CONTROLS[tcKey];
+    const isPublic = params.isPublic !== false;
+
+    const roomId = generateRoomId();
+    const token = crypto.randomUUID();
+    const now = Date.now();
+    const sock = params.socket ?? null;
+
+    const room: OnlineRoom = {
+      roomId,
+      chess: new Chess(),
+      moves: [],
+      lastMove: null,
+      isPublic,
+      createdAt: now,
+      updatedAt: now,
+      status: 'waiting',
+      timeControl: {
+        id: tc.id,
+        label: tc.label,
+        initialMs: tc.initialMs,
+        incrementMs: tc.incrementMs,
+      },
+      clocks: {
+        whiteMs: tc.initialMs,
+        blackMs: tc.initialMs,
+        lastTickAt: null,
+        active: false,
+      },
+      players: {
+        w: pref === 'w' ? { name: playerName, token, socket: sock, connected: Boolean(sock) } : null,
+        b: pref === 'b' ? { name: playerName, token, socket: sock, connected: Boolean(sock) } : null,
+      },
+      spectators: new Set(),
+      drawOfferBy: null,
+      rematchRequestedBy: { w: false, b: false },
+      result: null,
+      chat: [],
+    };
+
+    rooms.set(roomId, room);
+    return { room, role: pref, token };
+  }
+
   app.get('/api/rooms', (_req, res) => {
     const publicRooms: PublicRoomListing[] = [];
     for (const room of rooms.values()) {
@@ -241,6 +303,24 @@ async function startServer(): Promise<void> {
     }
     publicRooms.sort((a, b) => b.createdAt - a.createdAt);
     res.json({ rooms: publicRooms });
+  });
+
+  app.post('/api/rooms', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? (req.body as Record<string, unknown>) : {};
+    const { room, role, token } = createRoomRecord({
+      playerName: body.playerName,
+      preferredColor: body.preferredColor,
+      timeControlId: body.timeControlId,
+      isPublic: body.isPublic,
+      socket: null,
+    });
+
+    res.status(201).json({
+      roomId: room.roomId,
+      role,
+      playerToken: token,
+      snapshot: buildSnapshot(room),
+    });
   });
 
   const server = http.createServer(app);
@@ -261,55 +341,19 @@ async function startServer(): Promise<void> {
 
       if (type === 'room:create') {
         detachSocket(ws);
-        const playerName = sanitizeName(msg.playerName, 'Player 1');
-        const pref = msg.preferredColor === 'w' || msg.preferredColor === 'b' ? msg.preferredColor : Math.random() < 0.5 ? 'w' : 'b';
-        const tcKey = typeof msg.timeControlId === 'string' && VALID_TIME_CONTROLS[msg.timeControlId] ? msg.timeControlId : '10+5';
-        const tc = VALID_TIME_CONTROLS[tcKey];
-        const isPublic = msg.isPublic !== false;
-
-        const roomId = generateRoomId();
-        const token = crypto.randomUUID();
-        const now = Date.now();
-
-        const room: OnlineRoom = {
-          roomId,
-          chess: new Chess(),
-          moves: [],
-          lastMove: null,
-          isPublic,
-          createdAt: now,
-          updatedAt: now,
-          status: 'waiting',
-          timeControl: {
-            id: tc.id,
-            label: tc.label,
-            initialMs: tc.initialMs,
-            incrementMs: tc.incrementMs,
-          },
-          clocks: {
-            whiteMs: tc.initialMs,
-            blackMs: tc.initialMs,
-            lastTickAt: null,
-            active: false,
-          },
-          players: {
-            w: pref === 'w' ? { name: playerName, token, socket: ws, connected: true } : null,
-            b: pref === 'b' ? { name: playerName, token, socket: ws, connected: true } : null,
-          },
-          spectators: new Set(),
-          drawOfferBy: null,
-          rematchRequestedBy: { w: false, b: false },
-          result: null,
-          chat: [],
-        };
-
-        rooms.set(roomId, room);
-        socketMeta.set(ws, { roomId, role: pref });
+        const { room, role, token } = createRoomRecord({
+          playerName: msg.playerName,
+          preferredColor: msg.preferredColor,
+          timeControlId: msg.timeControlId,
+          isPublic: msg.isPublic,
+          socket: ws,
+        });
+        socketMeta.set(ws, { roomId: room.roomId, role });
 
         sendJson(ws, {
           type: 'room:joined',
-          roomId,
-          role: pref,
+          roomId: room.roomId,
+          role,
           playerToken: token,
           snapshot: buildSnapshot(room),
         });
